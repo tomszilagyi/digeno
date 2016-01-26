@@ -1,0 +1,4 @@
+*~
+src/*~
+ebin/*.beam
+digeno_workers.txt
