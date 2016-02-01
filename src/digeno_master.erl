@@ -10,7 +10,7 @@
 
 %% TODO allow multiple instances with the same fitness in the pool
 
--record(state, {callback_module, display_module, config, n_reds, population, workers}).
+-record(state, {callback_module, display_module, config, rr_pool, n_reds, population, workers}).
 -record(work_result, {pid, instance, eval_result}).
 
 start(CbMod, DispMod) ->
@@ -20,14 +20,15 @@ start_link(CbMod, DispMod) ->
     gen_server:start_link({global, ?MODULE}, ?MODULE, [CbMod, DispMod], []).
 
 init([CbMod, DispMod]) ->
-    ok = DispMod:init(CbMod),
+    {Cores, _MaxCores, _LogicalProcs} = utils:count_cores(),
+    ok = DispMod:init(CbMod, Cores),
     random:seed(now()),
 
     %% %% read back last saved state
     %% Filename = "output/tree.bin",
     %% {ok, TreeBin} = file:read_file(Filename),
     %% Tree = binary_to_term(TreeBin),
-    Tree = gb_trees:empty(),
+    Tree = ets:new(digeno_population, [ordered_set, public]),
 
     %% make sure all modules are loaded (so we can load them onto worker nodes)
     ModFilenames = filelib:wildcard("*.beam", filename:join(filename:dirname(code:priv_dir(digeno)), "ebin")),
@@ -41,8 +42,11 @@ init([CbMod, DispMod]) ->
     save_worker_nodes([]),
     DispMod:update_workers([]),
 
+    Pool = lists:map(fun(_) -> spawn_link(fun master/0) end, lists:seq(1, Cores)),
+    RRPool = utils:round_robin(Pool),
+
     Config = CbMod:get_config(),
-    {ok, #state{callback_module=CbMod, display_module=DispMod,
+    {ok, #state{callback_module=CbMod, display_module=DispMod, rr_pool=RRPool,
                 n_reds=0, population=Tree, config=Config, workers=[]}}.
 
 handle_call(Request, From, State) ->
@@ -53,8 +57,10 @@ handle_cast(Msg, State) ->
     io:format("~p: handle_cast: msg = ~p~n", [?MODULE, Msg]),
     {noreply, State}.
 
-handle_info(#work_result{}=WorkResult, #state{}=State) -> %% process work result
-    {noreply, process_result(WorkResult, State)};
+handle_info(#work_result{}=WorkResult, #state{rr_pool=RRPool0, n_reds=Reds}=State) -> %% process work result
+    {PoolPid, RRPool} = utils:round_robin(RRPool0),
+    PoolPid ! {process_result, self(), WorkResult, State},
+    {noreply, State#state{rr_pool=RRPool, n_reds=Reds+1}};
 handle_info({node, Node, Cores, Pids},
             #state{callback_module=CbMod, display_module=DispMod, workers=Workers}=State) -> %% new worker node
     NewWorkers = [{Node, Cores, Pids} | Workers],
@@ -107,49 +113,60 @@ remote_load_modules(Node, [{Mod,_Path} | Rest]) ->
     end,
     remote_load_modules(Node, Rest).
 
-process_result(#work_result{pid=Pid, instance=Instance, eval_result=EvalResult},
+process_result(PPid,
+               #work_result{pid=Pid, instance=Instance, eval_result=EvalResult},
                #state{callback_module=CbMod, display_module=DispMod,
-                      n_reds=Reds, population=Tree, config=Config} = State) ->
+                      n_reds=Reds, population=Tree, config=Config} = _State) ->
     Fitness = CbMod:fitness(Instance, EvalResult),
     Target = proplists:get_value(fitness_target, Config, infinity),
     Terminate = target_reached(Target, Fitness),
-    Tree1 = gb_trees:enter(Fitness, {Instance, EvalResult}, Tree),
-    Size = gb_trees:size(Tree1),
-    PPid = self(),
+    ets:insert(Tree, {Fitness, Instance, EvalResult}),
+    Size = ets:info(Tree, size),
     PopulationSize = proplists:get_value(population_size, Config, ?POPULATION_SIZE),
-    Tree2 = if Size > PopulationSize ->
-                    {_,_,T2} = gb_trees:take_smallest(Tree1),
-                    T2;
-               true -> Tree1
-            end,
+    if Size > PopulationSize -> ets:delete(Tree, ets:first(Tree));
+       true -> ok
+    end,
     if Terminate -> ok;
        Size >= PopulationSize -> spawn_work(Pid, PPid, CbMod, Size, Tree);
        true -> spawn_generate(Pid, PPid, CbMod)
     end,
     DisplayDecimator = proplists:get_value(display_decimator, Config, ?DISPLAY_DECIMATOR),
-    if (Reds rem DisplayDecimator) == 0 -> update_status(CbMod, DispMod, Reds, Tree2);
+    if (Reds rem DisplayDecimator) == 0 -> update_status(CbMod, DispMod, Reds, Tree);
        true -> ok
-    end,
-    State#state{n_reds=Reds+1, population=Tree2}.
+    end.
 
 target_reached(infinity, _Fitness) -> false;
 target_reached(Target, Fitness) -> Fitness >= Target.
 
+master() ->
+    random:seed(now()),
+    master_loop().
+
+master_loop() ->
+    receive
+        {process_result, PPid, WorkResult, State} ->
+            process_result(PPid, WorkResult, State),
+            master_loop();
+        stop ->
+            ok
+    end.
+
 spawn_work(Pid, PPid, CbMod, Size, Tree) ->
     case utils:crandom([mutate, cross, gen]) of
         mutate ->
+            BetterHalfKeys = utils:ets_keys(Tree, Size div 2, Size-1),
             %% Choose one randomly from the better half of the population
-            K1 = utils:crandom(lists:nthtail(Size div 2, gb_trees:keys(Tree))),
+            K1 = utils:crandom(BetterHalfKeys),
             %% Do a tournament selection on half the population (favors better instances)
-            %K1 = utils:tournament_select(gb_trees:keys(Tree), Size div 2),
-            {Inst1,_EvalResult} = gb_trees:get(K1, Tree),
+            %K1 = utils:tournament_select(BetterHalfKeys),
+            [{K1,Inst1,_EvalResult}] = ets:lookup(Tree, K1),
             spawn_mutate(Pid, PPid, CbMod, Inst1);
         cross ->
-            Keys = gb_trees:keys(Tree),
+            Keys = utils:ets_keys(Tree, 0, Size-1),
             K1 = utils:tournament_select(Keys, 5),
             K2 = utils:tournament_select(Keys, 5),
-            {Inst1,_EvalResult1} = gb_trees:get(K1, Tree),
-            {Inst2,_EvalResult2} = gb_trees:get(K2, Tree),
+            [{K1,Inst1,_EvalResult1}] = ets:lookup(Tree, K1),
+            [{K2,Inst2,_EvalResult2}] = ets:lookup(Tree, K2),
             spawn_combine(Pid, PPid, CbMod, Inst1, Inst2);
         gen ->
             spawn_generate(Pid, PPid, CbMod)
@@ -204,9 +221,11 @@ update_status(CbMod, DispMod, Reds, Tree) ->
     %% ok = filelib:ensure_dir(Filename),
     %% file:write_file(Filename, term_to_binary(Tree), [raw]);
 
-    {WorstFitness, {WorstInst, WorstResult}} = gb_trees:smallest(Tree),
-    {BestFitness, {BestInst, BestResult}} = gb_trees:largest(Tree),
+    WorstFitness = ets:first(Tree),
+    [{WorstFitness, WorstInst, WorstResult}] = ets:lookup(Tree, WorstFitness),
+    BestFitness = ets:first(Tree),
+    [{BestFitness, BestInst, BestResult}] = ets:lookup(Tree, BestFitness),
 
-    DispMod:update_status(Reds, gb_trees:size(Tree),
+    DispMod:update_status(Reds, ets:info(Tree, size),
                           {CbMod:format(WorstInst), CbMod:format_result(WorstResult), WorstFitness},
                           {CbMod:format(BestInst), CbMod:format_result(BestResult), BestFitness}).

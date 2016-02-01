@@ -4,7 +4,9 @@
 %% Behaviour callbacks for the module implementing the display / UI
 
 %% Initialize the display module
--callback init(CbMod :: atom()) -> ok | {error, Reason :: term()}.
+-callback init(CbMod :: atom(),
+               Cores :: pos_integer()) ->
+    ok | {error, Reason :: term()}.
 
 %% Update the displayed list of worker nodes
 -callback update_workers(WorkerNodes :: [{Node :: atom(),

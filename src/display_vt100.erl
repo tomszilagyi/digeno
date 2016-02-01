@@ -4,16 +4,16 @@
 -behaviour(digeno_display).
 
 %% digeno display callback functions
--export([init/1,
+-export([init/2,
          update_workers/1,
          update_status/4]).
 
 %% This is a minimalistic display module for DiGenO, meant to be run
 %% in a vt100-compatible terminal (eg. xterm).
 
-init(CbMod) ->
+init(CbMod, Cores) ->
     io:format("\e[2J\e[0;0f"),
-    io:format("DiGenO running with callback module: ~p~n", [CbMod]),
+    io:format("DiGenO master on ~B cores running with callback module: ~p~n", [Cores, CbMod]),
     ok.
 
 update_workers(WorkerNodes) ->

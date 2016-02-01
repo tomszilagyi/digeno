@@ -3,9 +3,11 @@
 -export([ceil/1, floor/1,
          crandom/1, grandom/1, xrandom/3,
          drop_item/2, add_item/3, change_item/3,
-         tournament_select/2,
+         tournament_select/1, tournament_select/2,
          format_float/3,
-         count_cores/0]).
+         count_cores/0,
+         round_robin/1,
+         ets_keys/3]).
 -export([randtest/1]).
 
 %% numeric utilities
@@ -67,6 +69,8 @@ change_item(N, Item, List) ->
     lists:sublist(List, N-1) ++ [Item] ++ lists:nthtail(N, List).
 
 %% classical tournament selection method
+tournament_select(Keys) -> tournament_select(Keys, length(Keys)).
+
 tournament_select(Keys, TournamentLength) ->
     ts_1(Keys, length(Keys), TournamentLength, []).
 
@@ -123,3 +127,28 @@ count_cores() ->
 		C -> min(C, MaxCores)
 	    end,
     {Cores, MaxCores, LogicalProcs}.
+
+%% Generate an infinite round-robin sequence based on the elements of
+%% the list. This function is used to initialize the generator's state
+%% with a list of elements to use in RR fashion.
+round_robin(List) when is_list(List) -> {List, List};
+%% Generate the next element in the RR sequence, and the new RR state.
+%% Return {Element, NextState}.
+round_robin({[], List}) -> round_robin({List, List});
+round_robin({[E|Rest], List}) -> {E, {Rest, List}}.
+
+%% Get list of keys from an ordered_set ets table.
+%% Keys from positions Start to End are returned in Erlang term order.
+ets_keys(Tab, Start, End) ->
+    ets_keys(Tab, ets:info(Tab, keypos), Start, End, []).
+
+ets_keys(Tab, Keypos, Start, Start, L) ->
+    case ets:slot(Tab, Start) of
+        [T] -> [element(Keypos, T) | L];
+        _ -> L
+    end;
+ets_keys(Tab, Keypos, Start, End, L) ->
+    case ets:slot(Tab, End) of
+        [T] -> ets_keys(Tab, Keypos, Start, End-1, [element(Keypos, T) | L]);
+        '$end_of_table' -> ets_keys(Tab, Keypos, Start, End-1, L)
+    end.

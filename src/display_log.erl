@@ -4,15 +4,15 @@
 -behaviour(digeno_display).
 
 %% digeno display callback functions
--export([init/1,
+-export([init/2,
          update_workers/1,
          update_status/4]).
 
 %% This is a minimal display module for DiGenO, meant to provide an
 %% example (and aid with debugging).
 
-init(CbMod) ->
-    io:format("DiGenO running with callback module: ~p~n", [CbMod]),
+init(CbMod, Cores) ->
+    io:format("DiGenO master on ~B cores running with callback module: ~p~n", [Cores, CbMod]),
     ok.
 
 update_workers(Workers) ->
