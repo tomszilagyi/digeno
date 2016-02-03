@@ -4,8 +4,6 @@
 -export([start/2, start_link/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
-%% TODO delegate the display to a display_module
-
 %% hardcoded default if missing from callback's get_config()
 -define(DISPLAY_DECIMATOR, 100).
 -define(POPULATION_SIZE, 100).
@@ -141,9 +139,9 @@ spawn_work(Pid, PPid, CbMod, Size, Tree) ->
     case utils:crandom([mutate, cross, gen]) of
         mutate ->
             %% Choose one randomly from the better half of the population
-            %K1 = utils:crandom(lists:nthtail(Size div 2, gb_trees:keys(Tree))),
+            K1 = utils:crandom(lists:nthtail(Size div 2, gb_trees:keys(Tree))),
             %% Do a tournament selection on half the population (favors better instances)
-            K1 = utils:tournament_select(gb_trees:keys(Tree), Size div 2),
+            %K1 = utils:tournament_select(gb_trees:keys(Tree), Size div 2),
             {Inst1,_EvalResult} = gb_trees:get(K1, Tree),
             spawn_mutate(Pid, PPid, CbMod, Inst1);
         cross ->
