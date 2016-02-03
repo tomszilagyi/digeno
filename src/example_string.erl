@@ -1,4 +1,4 @@
--module(example).
+-module(example_string).
 -author('Tom Szilagyi <tomszilagyi@gmail.com>').
 -behaviour(digeno_callback).
 
