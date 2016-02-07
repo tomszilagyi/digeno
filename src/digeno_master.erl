@@ -10,7 +10,8 @@
 
 %% TODO allow multiple instances with the same fitness in the pool
 
--record(state, {callback_module, display_module, config, n_reds, population, workers}).
+-record(state, {callback_module, display_module, config, n_reds,
+                population, workers, terminate}).
 -record(work_result, {pid, instance, eval_result}).
 
 start(CbMod, DispMod) ->
@@ -43,7 +44,8 @@ init([CbMod, DispMod]) ->
 
     Config = CbMod:get_config(),
     {ok, #state{callback_module=CbMod, display_module=DispMod,
-                n_reds=0, population=Tree, config=Config, workers=[]}}.
+                n_reds=0, population=Tree, config=Config, workers=[],
+                terminate=false}}.
 
 handle_call(Request, From, State) ->
     io:format("~p: handle_call: req = ~p  from = ~p~n", [?MODULE, Request, From]),
@@ -109,10 +111,11 @@ remote_load_modules(Node, [{Mod,_Path} | Rest]) ->
 
 process_result(#work_result{pid=Pid, instance=Instance, eval_result=EvalResult},
                #state{callback_module=CbMod, display_module=DispMod,
-                      n_reds=Reds, population=Tree, config=Config} = State) ->
+                      n_reds=Reds, population=Tree, config=Config,
+                      terminate=Terminate0} = State) ->
     Fitness = CbMod:fitness(Instance, EvalResult),
     Target = proplists:get_value(fitness_target, Config, infinity),
-    Terminate = target_reached(Target, Fitness),
+    Terminate = Terminate0 orelse target_reached(Target, Fitness),
     Tree1 = gb_trees:enter(Fitness, {Instance, EvalResult}, Tree),
     Size = gb_trees:size(Tree1),
     PPid = self(),
@@ -127,10 +130,11 @@ process_result(#work_result{pid=Pid, instance=Instance, eval_result=EvalResult},
        true -> spawn_generate(Pid, PPid, CbMod)
     end,
     DisplayDecimator = proplists:get_value(display_decimator, Config, ?DISPLAY_DECIMATOR),
-    if (Reds rem DisplayDecimator) == 0 -> update_status(CbMod, DispMod, Reds, Tree2);
+    DoDisplay = (Reds rem DisplayDecimator) == 0,
+    if DoDisplay or Terminate -> update_status(CbMod, DispMod, Reds, Tree2);
        true -> ok
     end,
-    State#state{n_reds=Reds+1, population=Tree2}.
+    State#state{n_reds=Reds+1, population=Tree2, terminate=Terminate}.
 
 target_reached(infinity, _Fitness) -> false;
 target_reached(Target, Fitness) -> Fitness >= Target.
