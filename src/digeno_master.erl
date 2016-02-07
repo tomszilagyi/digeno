@@ -10,7 +10,8 @@
 
 %% TODO allow multiple instances with the same fitness in the pool
 
--record(state, {callback_module, display_module, config, rr_pool, n_reds, population, workers}).
+-record(state, {callback_module, display_module, config, rr_pool, n_reds,
+                population, workers, terminate}).
 -record(work_result, {pid, instance, eval_result}).
 
 start(CbMod, DispMod) ->
@@ -47,7 +48,8 @@ init([CbMod, DispMod]) ->
 
     Config = CbMod:get_config(),
     {ok, #state{callback_module=CbMod, display_module=DispMod, rr_pool=RRPool,
-                n_reds=0, population=Tree, config=Config, workers=[]}}.
+                n_reds=0, population=Tree, config=Config, workers=[],
+                terminate=false}}.
 
 handle_call(Request, From, State) ->
     io:format("~p: handle_call: req = ~p  from = ~p~n", [?MODULE, Request, From]),
@@ -116,10 +118,11 @@ remote_load_modules(Node, [{Mod,_Path} | Rest]) ->
 process_result(PPid,
                #work_result{pid=Pid, instance=Instance, eval_result=EvalResult},
                #state{callback_module=CbMod, display_module=DispMod,
-                      n_reds=Reds, population=Tree, config=Config} = _State) ->
+                      n_reds=Reds, population=Tree, config=Config,
+                      terminate=Terminate0} = _State) ->
     Fitness = CbMod:fitness(Instance, EvalResult),
     Target = proplists:get_value(fitness_target, Config, infinity),
-    Terminate = target_reached(Target, Fitness),
+    Terminate = Terminate0 orelse target_reached(Target, Fitness),
     ets:insert(Tree, {Fitness, Instance, EvalResult}),
     Size = ets:info(Tree, size),
     PopulationSize = proplists:get_value(population_size, Config, ?POPULATION_SIZE),
@@ -162,11 +165,16 @@ spawn_work(Pid, PPid, CbMod, Size, Tree) ->
             [{K1,Inst1,_EvalResult}] = ets:lookup(Tree, K1),
             spawn_mutate(Pid, PPid, CbMod, Inst1);
         cross ->
-            Keys = utils:ets_keys(Tree, 0, Size-1),
-            K1 = utils:tournament_select(Keys, 5),
-            K2 = utils:tournament_select(Keys, 5),
-            [{K1,Inst1,_EvalResult1}] = ets:lookup(Tree, K1),
-            [{K2,Inst2,_EvalResult2}] = ets:lookup(Tree, K2),
+            %% Keys = utils:ets_keys(Tree, 0, Size-1),
+            %% K1 = utils:tournament_select(Keys, 5),
+            %% K2 = utils:tournament_select(Keys, 5),
+            %% [{K1,Inst1,_EvalResult1}] = ets:lookup(Tree, K1),
+            %% [{K2,Inst2,_EvalResult2}] = ets:lookup(Tree, K2),
+            Slots = lists:seq(0, Size-1),
+            S1 = utils:tournament_select(Slots, 5),
+            S2 = utils:tournament_select(Slots, 5),
+            [{_K1,Inst1,_EvalResult1}] = ets:slot(Tree, S1),
+            [{_K2,Inst2,_EvalResult2}] = ets:slot(Tree, S2),
             spawn_combine(Pid, PPid, CbMod, Inst1, Inst2);
         gen ->
             spawn_generate(Pid, PPid, CbMod)
@@ -223,7 +231,7 @@ update_status(CbMod, DispMod, Reds, Tree) ->
 
     WorstFitness = ets:first(Tree),
     [{WorstFitness, WorstInst, WorstResult}] = ets:lookup(Tree, WorstFitness),
-    BestFitness = ets:first(Tree),
+    BestFitness = ets:last(Tree),
     [{BestFitness, BestInst, BestResult}] = ets:lookup(Tree, BestFitness),
 
     DispMod:update_status(Reds, ets:info(Tree, size),
