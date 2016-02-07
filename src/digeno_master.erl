@@ -66,7 +66,7 @@ handle_info({node, Node, Cores, Pids},
     remote_load_modules(Node, ModsToLoad),
     %% start new workload in each of the worker pids (one per core)
     PPid = self(),
-    lists:foreach(fun(P) -> spawn_eval(P, PPid, CbMod) end, Pids),
+    lists:foreach(fun(P) -> spawn_generate(P, PPid, CbMod) end, Pids),
     save_worker_nodes(NewWorkers),
     DispMod:update_workers(NewWorkers),
     {noreply, State#state{workers=NewWorkers}};
@@ -124,7 +124,7 @@ process_result(#work_result{pid=Pid, instance=Instance, eval_result=EvalResult},
             end,
     if Terminate -> ok;
        Size >= PopulationSize -> spawn_work(Pid, PPid, CbMod, Size, Tree);
-       true -> spawn_eval(Pid, PPid, CbMod)
+       true -> spawn_generate(Pid, PPid, CbMod)
     end,
     DisplayDecimator = proplists:get_value(display_decimator, Config, ?DISPLAY_DECIMATOR),
     if (Reds rem DisplayDecimator) == 0 -> update_status(CbMod, DispMod, Reds, Tree2);
@@ -152,10 +152,10 @@ spawn_work(Pid, PPid, CbMod, Size, Tree) ->
             {Inst2,_EvalResult2} = gb_trees:get(K2, Tree),
             spawn_combine(Pid, PPid, CbMod, Inst1, Inst2);
         gen ->
-            spawn_eval(Pid, PPid, CbMod)
+            spawn_generate(Pid, PPid, CbMod)
     end.
 
-spawn_eval(Pid, PPid, CbMod) ->
+spawn_generate(Pid, PPid, CbMod) ->
     Pid ! {run, fun() -> generate_eval(PPid, CbMod) end}.
 
 spawn_mutate(Pid, PPid, CbMod, Inst1) ->

@@ -60,7 +60,7 @@ dead_on_arrival(_Fn, _Result) -> false.
 fitness(_Fn, 0) -> 2.0;
 fitness(_Fn, Result) -> 1.0 / Result.
 
-format(Fn) -> string:join([io_lib:format("~.6f", [Ai]) || Ai <- Fn], " ").
+format(Fn) -> string:join([io_lib:format("~9.6f", [Ai]) || Ai <- Fn], " ").
 
 format_result(Result) -> io_lib:format("~f", [Result]).
 
