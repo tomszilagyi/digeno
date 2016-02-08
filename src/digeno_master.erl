@@ -59,6 +59,9 @@ handle_cast(Msg, State) ->
     io:format("~p: handle_cast: msg = ~p~n", [?MODULE, Msg]),
     {noreply, State}.
 
+handle_info(terminate, #state{rr_pool=RRPool}=State) -> %% we are done
+    lists:foreach(fun(P) -> P ! terminate end, utils:round_robin_to_list(RRPool)),
+    {noreply, State#state{terminate=true}};
 handle_info(#work_result{}=WorkResult, #state{rr_pool=RRPool0, n_reds=Reds}=State) -> %% process work result
     {PoolPid, RRPool} = utils:round_robin(RRPool0),
     PoolPid ! {process_result, self(), WorkResult, State},
@@ -123,10 +126,10 @@ process_result(PPid,
     Fitness = CbMod:fitness(Instance, EvalResult),
     Target = proplists:get_value(fitness_target, Config, infinity),
     Terminate = Terminate0 orelse target_reached(Target, Fitness),
-    ets:insert(Tree, {Fitness, Instance, EvalResult}),
+    ets:insert(Tree, {-Fitness, Instance, EvalResult}),
     Size = ets:info(Tree, size),
     PopulationSize = proplists:get_value(population_size, Config, ?POPULATION_SIZE),
-    if Size > PopulationSize -> ets:delete(Tree, ets:first(Tree));
+    if Size > PopulationSize -> ets:delete(Tree, ets:last(Tree));
        true -> ok
     end,
     if Terminate -> ok;
@@ -134,9 +137,11 @@ process_result(PPid,
        true -> spawn_generate(Pid, PPid, CbMod)
     end,
     DisplayDecimator = proplists:get_value(display_decimator, Config, ?DISPLAY_DECIMATOR),
-    if (Reds rem DisplayDecimator) == 0 -> update_status(CbMod, DispMod, Reds, Tree);
+    DoDisplay = (Reds rem DisplayDecimator) == 0,
+    if DoDisplay or Terminate -> update_status(CbMod, DispMod, Reds, Tree);
        true -> ok
-    end.
+    end,
+    Terminate.
 
 target_reached(infinity, _Fitness) -> false;
 target_reached(Target, Fitness) -> Fitness >= Target.
@@ -148,31 +153,27 @@ master() ->
 master_loop() ->
     receive
         {process_result, PPid, WorkResult, State} ->
-            process_result(PPid, WorkResult, State),
-            master_loop();
-        stop ->
+            Terminate = process_result(PPid, WorkResult, State),
+            case Terminate of
+                true  -> PPid ! terminate;
+                false -> master_loop()
+            end;
+        terminate ->
             ok
     end.
 
 spawn_work(Pid, PPid, CbMod, Size, Tree) ->
     case utils:crandom([mutate, cross, gen]) of
         mutate ->
-            BetterHalfKeys = utils:ets_keys(Tree, Size div 2, Size-1),
             %% Choose one randomly from the better half of the population
-            K1 = utils:crandom(BetterHalfKeys),
+            S1 = random:uniform(Size div 2) - 1,
             %% Do a tournament selection on half the population (favors better instances)
-            %K1 = utils:tournament_select(BetterHalfKeys),
-            [{K1,Inst1,_EvalResult}] = ets:lookup(Tree, K1),
+            %S1 = utils:grandom(Size div 2) - 1,
+            [{_K1,Inst1,_EvalResult}] = ets:slot(Tree, S1),
             spawn_mutate(Pid, PPid, CbMod, Inst1);
         cross ->
-            %% Keys = utils:ets_keys(Tree, 0, Size-1),
-            %% K1 = utils:tournament_select(Keys, 5),
-            %% K2 = utils:tournament_select(Keys, 5),
-            %% [{K1,Inst1,_EvalResult1}] = ets:lookup(Tree, K1),
-            %% [{K2,Inst2,_EvalResult2}] = ets:lookup(Tree, K2),
-            Slots = lists:seq(0, Size-1),
-            S1 = utils:tournament_select(Slots, 5),
-            S2 = utils:tournament_select(Slots, 5),
+            S1 = utils:grandom(5) - 1,
+            S2 = utils:grandom(5) - 1,
             [{_K1,Inst1,_EvalResult1}] = ets:slot(Tree, S1),
             [{_K2,Inst2,_EvalResult2}] = ets:slot(Tree, S2),
             spawn_combine(Pid, PPid, CbMod, Inst1, Inst2);
@@ -229,11 +230,11 @@ update_status(CbMod, DispMod, Reds, Tree) ->
     %% ok = filelib:ensure_dir(Filename),
     %% file:write_file(Filename, term_to_binary(Tree), [raw]);
 
-    WorstFitness = ets:first(Tree),
-    [{WorstFitness, WorstInst, WorstResult}] = ets:lookup(Tree, WorstFitness),
-    BestFitness = ets:last(Tree),
-    [{BestFitness, BestInst, BestResult}] = ets:lookup(Tree, BestFitness),
+    %WorstFitness = ets:last(Tree),
+    [{WorstFitness, WorstInst, WorstResult}] = utils:ets_last_item(Tree),
+    %BestFitness = ets:first(Tree),
+    [{BestFitness, BestInst, BestResult}] = ets:slot(Tree, 0),
 
     DispMod:update_status(Reds, ets:info(Tree, size),
-                          {CbMod:format(WorstInst), CbMod:format_result(WorstResult), WorstFitness},
-                          {CbMod:format(BestInst), CbMod:format_result(BestResult), BestFitness}).
+                          {CbMod:format(WorstInst), CbMod:format_result(WorstResult), -WorstFitness},
+                          {CbMod:format(BestInst), CbMod:format_result(BestResult), -BestFitness}).

@@ -7,7 +7,9 @@
          format_float/3,
          count_cores/0,
          round_robin/1,
-         ets_keys/3]).
+         round_robin_to_list/1,
+         ets_keys/3,
+         ets_last_item/1]).
 -export([randtest/1]).
 
 %% numeric utilities
@@ -137,6 +139,9 @@ round_robin(List) when is_list(List) -> {List, List};
 round_robin({[], List}) -> round_robin({List, List});
 round_robin({[E|Rest], List}) -> {E, {Rest, List}}.
 
+%% Get the list back
+round_robin_to_list({_, List}) -> List.
+
 %% Get list of keys from an ordered_set ets table.
 %% Keys from positions Start to End are returned in Erlang term order.
 ets_keys(Tab, Start, End) ->
@@ -151,4 +156,11 @@ ets_keys(Tab, Keypos, Start, End, L) ->
     case ets:slot(Tab, End) of
         [T] -> ets_keys(Tab, Keypos, Start, End-1, [element(Keypos, T) | L]);
         '$end_of_table' -> ets_keys(Tab, Keypos, Start, End-1, L)
+    end.
+
+
+%% Get the last item of a concurrently accessed ordered_set table
+ets_last_item(Tab) ->
+    try [T] = ets:slot(Tab, ets:info(Tab, size)), [T]
+    catch _:_ -> ets_last_item(Tab)
     end.
