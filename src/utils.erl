@@ -1,8 +1,9 @@
 -module(utils).
 -author('Tom Szilagyi <tomszilagyi@gmail.com>').
 -export([ceil/1, floor/1,
-         crandom/1, grandom/1, xrandom/3,
+         crandom/1, prandom/1, grandom/1, xrandom/3,
          drop_item/2, add_item/3, change_item/3,
+         permutation/1,
          tournament_select/2,
          format_float/3,
          count_cores/0]).
@@ -27,6 +28,12 @@ floor(X) ->
 
 %% choose one of the list members as random, with equal possibility
 crandom(Choices) -> lists:nth(random:uniform(length(Choices)), Choices).
+
+%% pick one of the list members as random; return a tuple with the
+%% chosen item and a list of the remaining items.
+prandom(Choices) ->
+    Idx = random:uniform(length(Choices)),
+    {lists:nth(Idx, Choices), drop_item(Idx, Choices)}.
 
 %% random integer in range [1..N], with decreasing probability
 %% Test with: randtest(fun() -> grandom(20) end).
@@ -65,6 +72,15 @@ add_item(N, Item, List) ->
 change_item(N, Item, List) ->
     %% List item number N (one-based) changed to Item
     lists:sublist(List, N-1) ++ [Item] ++ lists:nthtail(N, List).
+
+%% random permutation of the items of a list
+permutation(List) ->
+    permutation(List, []).
+
+permutation([], List) -> List;
+permutation(Source, List) ->
+    {Item, Rest} = prandom(Source),
+    permutation(Rest, [Item | List]).
 
 %% classical tournament selection method
 tournament_select(Keys, TournamentLength) ->
