@@ -11,8 +11,8 @@
 %% TODO allow multiple instances with the same fitness in the pool
 
 -record(state, {callback_module, display_module, config, n_reds,
-                population, workers, terminate}).
--record(work_result, {pid, instance, eval_result}).
+                population, workers, converg, terminate}).
+-record(work_result, {pid, instance, eval_result, fitness}).
 
 start(CbMod, DispMod) ->
     start_link(CbMod, DispMod).
@@ -45,7 +45,7 @@ init([CbMod, DispMod]) ->
     Config = CbMod:get_config(),
     {ok, #state{callback_module=CbMod, display_module=DispMod,
                 n_reds=0, population=Tree, config=Config, workers=[],
-                terminate=false}}.
+                converg=[], terminate=false}}.
 
 handle_call(Request, From, State) ->
     io:format("~p: handle_call: req = ~p  from = ~p~n", [?MODULE, Request, From]),
@@ -109,46 +109,56 @@ remote_load_modules(Node, [{Mod,_Path} | Rest]) ->
     end,
     remote_load_modules(Node, Rest).
 
-process_result(#work_result{pid=Pid, instance=Instance, eval_result=EvalResult},
+process_result(#work_result{pid=Pid, instance=Instance, eval_result=EvalResult, fitness=Fitness},
                #state{callback_module=CbMod, display_module=DispMod,
-                      n_reds=Reds, population=Tree, config=Config,
-                      terminate=Terminate0} = State) ->
-    Fitness = CbMod:fitness(Instance, EvalResult),
+                      n_reds=Reds, population=Tree0, config=Config,
+                      converg=Converg0, terminate=Terminate0} = State) ->
     Target = proplists:get_value(fitness_target, Config, infinity),
-    Terminate = Terminate0 orelse target_reached(Target, Fitness),
-    Tree1 = gb_trees:enter(Fitness, {Instance, EvalResult}, Tree),
-    Size = gb_trees:size(Tree1),
-    PPid = self(),
+    Converg = update_converg(Converg0, Reds, Fitness),
+    Terminate = Terminate0 orelse target_reached(Target, Fitness) orelse converg_reached(Converg),
+    Tree1 = gb_trees:enter(Fitness, {Instance, EvalResult}, Tree0),
     PopulationSize = proplists:get_value(population_size, Config, ?POPULATION_SIZE),
-    Tree2 = if Size > PopulationSize ->
-                    {_,_,T2} = gb_trees:take_smallest(Tree1),
-                    T2;
-               true -> Tree1
-            end,
+    Tree = crop_population(Tree1, gb_trees:size(Tree1) - PopulationSize),
+    Size = gb_trees:size(Tree),
+    PPid = self(),
     if Terminate -> ok;
-       Size >= PopulationSize -> spawn_work(Pid, PPid, CbMod, Size, Tree);
+       Size >= PopulationSize -> spawn_work(Pid, PPid, CbMod, Tree);
        true -> spawn_generate(Pid, PPid, CbMod)
     end,
     DisplayDecimator = proplists:get_value(display_decimator, Config, ?DISPLAY_DECIMATOR),
     DoDisplay = (Reds rem DisplayDecimator) == 0,
-    if DoDisplay or Terminate -> update_status(CbMod, DispMod, Reds, Tree2);
+    if DoDisplay or Terminate -> update_status(CbMod, DispMod, Reds, Tree);
        true -> ok
     end,
-    State#state{n_reds=Reds+1, population=Tree2, terminate=Terminate}.
+    State#state{n_reds=Reds+1, population=Tree, converg=Converg, terminate=Terminate}.
 
 target_reached(infinity, _Fitness) -> false;
 target_reached(Target, Fitness) -> Fitness >= Target.
 
-spawn_work(Pid, PPid, CbMod, Size, Tree) ->
-    case utils:crandom([mutate, cross, gen]) of
+converg_reached([{R1, Fb} | _]) ->
+    %% S1 = (Fw1 - Fw2) / (math:log(R1) - math:log(R2)),
+    %% S2 = (Fw2 - Fw3) / (math:log(R2) - math:log(R3)),
+    %% io:format("S1 = ~f  S2 = ~f~n", [S1, S2]),
+    %% S1 < 0.1 * S2;
+    false;
+    %(Fw1 - Fw2) / (math:log(R1) - math:log(R2)) < 0.1 * (Fw2 - Fw3) / (math:log(R2) - math:log(R3));
+converg_reached(_) -> false.
+
+crop_population(Tree, N) when N > 0 ->
+    {_,_,Tree1} = gb_trees:take_smallest(Tree),
+    crop_population(Tree1, N-1);
+crop_population(Tree, _) -> Tree.
+
+spawn_work(Pid, PPid, CbMod, Tree) ->
+    case utils:crandom([mutate, combine, gen]) of
         mutate ->
             %% Choose one randomly from the better half of the population
-            K1 = utils:crandom(lists:nthtail(Size div 2, gb_trees:keys(Tree))),
+            K1 = utils:crandom(lists:nthtail(gb_trees:size(Tree) div 2, gb_trees:keys(Tree))),
             %% Do a tournament selection on half the population (favors better instances)
-            %K1 = utils:tournament_select(gb_trees:keys(Tree), Size div 2),
+            %K1 = utils:tournament_select(gb_trees:keys(Tree), gb_trees:size(Tree) div 2),
             {Inst1,_EvalResult} = gb_trees:get(K1, Tree),
             spawn_mutate(Pid, PPid, CbMod, Inst1);
-        cross ->
+        combine ->
             Keys = gb_trees:keys(Tree),
             K1 = utils:tournament_select(Keys, 5),
             K2 = utils:tournament_select(Keys, 5),
@@ -178,28 +188,44 @@ save_worker_nodes(Workers) ->
 generate_eval(PPid, CbMod) ->
     Instance = CbMod:generate(),
     EvalResult = CbMod:evaluate(Instance),
+    Fitness = CbMod:fitness(Instance, EvalResult),
     case CbMod:dead_on_arrival(Instance, EvalResult) of
         true -> generate_eval(PPid, CbMod);
-        _    -> PPid ! #work_result{pid=self(), instance=Instance, eval_result=EvalResult}
+        _    -> PPid ! #work_result{pid=self(), instance=Instance,
+                                    eval_result=EvalResult, fitness=Fitness}
     end.
 
 
 mutate_eval(PPid, CbMod, Inst1) ->
     Instance = CbMod:mutate(Inst1),
     EvalResult = CbMod:evaluate(Instance),
+    Fitness = CbMod:fitness(Instance, EvalResult),
     case CbMod:dead_on_arrival(Instance, EvalResult) of
         true -> mutate_eval(PPid, CbMod, Inst1);
-        _    -> PPid ! #work_result{pid=self(), instance=Instance, eval_result=EvalResult}
+        _    -> PPid ! #work_result{pid=self(), instance=Instance,
+                                    eval_result=EvalResult, fitness=Fitness}
     end.
 
 
 combine_eval(PPid, CbMod, Inst1, Inst2) ->
     Instance = CbMod:combine(Inst1, Inst2),
     EvalResult = CbMod:evaluate(Instance),
+    Fitness = CbMod:fitness(Instance, EvalResult),
     case CbMod:dead_on_arrival(Instance, EvalResult) of
         true -> combine_eval(PPid, CbMod, Inst1, Inst2);
-        _    -> PPid ! #work_result{pid=self(), instance=Instance, eval_result=EvalResult}
+        _    -> PPid ! #work_result{pid=self(), instance=Instance,
+                                    eval_result=EvalResult, fitness=Fitness}
     end.
+
+
+update_converg([], Reds, Fitness) ->
+    [{Reds, Fitness}];
+update_converg([{_, BestFitness} | _Rest] = Converg, _Reds, Fitness) when BestFitness >= Fitness ->
+    Converg;
+update_converg(Converg, Reds, Fitness) ->
+    NewConverg = [{Reds, Fitness} | Converg],
+    io:format("Converg: ~p~n", [NewConverg]),
+    NewConverg. %lists:sublist(NewConverg, 10). %% limit length
 
 
 update_status(CbMod, DispMod, Reds, Tree) ->
