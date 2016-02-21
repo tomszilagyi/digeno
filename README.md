@@ -62,3 +62,10 @@ Examples provided:
 - example_string: Optimize randomly generated strings towards a given target
 - example_curve: Fit a polynomial curve to a set of points
 - example_tsp: Travelling Salesman Problem
+
+The `utils` module contains several useful facilities for writing
+functions that operate in a probabilistic manner (eg. use random
+selection).
+
+A more extended guide to DiGenO usage and the provided examples:
+https://tomszilagyi.github.io/digeno

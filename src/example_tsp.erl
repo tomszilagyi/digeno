@@ -13,8 +13,8 @@
          format/1,
          format_result/1]).
 
-% debug
--compile([export_all]).
+%% other exports
+-export([city_name/1]).
 
 %% This is a module defining a Genetic Optimisation problem.
 
@@ -64,7 +64,6 @@ city_name(21) -> "Östersund".
 %% digeno callbacks
 
 get_config() -> [{population_size, 1000},
-                 %%{fitness_target, 100.0}, %% TODO convergence_detection
                  {display_decimator, 1000}].
 
 generate() -> utils:permutation(lists:seq(1, ?NUM_CITIES)).
