@@ -6,6 +6,7 @@
 %% digeno display callback functions
 -export([init/1,
          update_workers/1,
+         update_converg/2,
          update_status/4]).
 
 %% This is a minimalistic display module for DiGenO, meant to be run
@@ -18,6 +19,10 @@ init(CbMod) ->
 
 update_workers(WorkerNodes) ->
     print_worker_nodes(WorkerNodes),
+    ok.
+
+update_converg(Reductions, BestFitness) ->
+    io:format("\e[11;1f\e[7mConvergence\e[0m~n~8B~n~.6f\e[K~n", [Reductions, BestFitness]),
     ok.
 
 update_status(Reductions, PopulationSize,
@@ -37,8 +42,8 @@ update_status(Reductions, PopulationSize,
 
 print_worker_nodes(Workers) ->
     SumCores = lists:sum([Cores || {_Node, Cores, _Pids} <- Workers]),
-    io:format("\e[13;0f\e[7mWorker nodes (~B)\e[0m\e[K", [SumCores]),
-    pwn_1(lists:sort(fun({NA,_,_},{NB,_,_}) -> NA =< NB end, Workers), 14).
+    io:format("\e[15;0f\e[7mWorker nodes (~B)\e[0m\e[K", [SumCores]),
+    pwn_1(lists:sort(fun({NA,_,_},{NB,_,_}) -> NA =< NB end, Workers), 16).
 
 pwn_1([], Row) ->
     io:format("\e[~B;0f\e[K", [Row]);

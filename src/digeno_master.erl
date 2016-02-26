@@ -114,7 +114,7 @@ process_result(#work_result{pid=Pid, instance=Instance, eval_result=EvalResult, 
                       n_reds=Reds, population=Tree0, config=Config,
                       converg=Converg0, terminate=Terminate0} = State) ->
     Target = proplists:get_value(fitness_target, Config, infinity),
-    Converg = update_converg(Converg0, Reds, Fitness),
+    Converg = update_converg(DispMod, Converg0, Reds, Fitness),
     Terminate = Terminate0 orelse target_reached(Target, Fitness) orelse converg_reached(Converg),
     Tree1 = gb_trees:enter(Fitness, {Instance, EvalResult}, Tree0),
     PopulationSize = proplists:get_value(population_size, Config, ?POPULATION_SIZE),
@@ -218,14 +218,16 @@ combine_eval(PPid, CbMod, Inst1, Inst2) ->
     end.
 
 
-update_converg([], Reds, Fitness) ->
+update_converg(DispMod, [], Reds, Fitness) ->
+    DispMod:update_converg(Reds, Fitness),
     [{Reds, Fitness}];
-update_converg([{_, BestFitness} | _Rest] = Converg, _Reds, Fitness) when BestFitness >= Fitness ->
+update_converg(_DispMod, [{_, BestFitness} | _Rest] = Converg, _Reds, Fitness)
+  when BestFitness >= Fitness ->
     Converg;
-update_converg(Converg, Reds, Fitness) ->
+update_converg(DispMod, Converg, Reds, Fitness) ->
+    DispMod:update_converg(Reds, Fitness),
     NewConverg = [{Reds, Fitness} | Converg],
-    io:format("Converg: ~p~n", [NewConverg]),
-    NewConverg. %lists:sublist(NewConverg, 10). %% limit length
+    lists:sublist(NewConverg, 10). %% limit length
 
 
 update_status(CbMod, DispMod, Reds, Tree) ->

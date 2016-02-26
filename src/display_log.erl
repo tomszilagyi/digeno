@@ -6,6 +6,7 @@
 %% digeno display callback functions
 -export([init/1,
          update_workers/1,
+         update_converg/2,
          update_status/4]).
 
 %% This is a minimal display module for DiGenO, meant to provide an
@@ -20,6 +21,10 @@ update_workers(Workers) ->
     io:format("Worker nodes (total cores: ~B): ", [SumCores]),
     SL = [io_lib:format("~p (~B)", [Node, Cores])  || {Node, Cores, _Pids} <- Workers],
     io:format("~s~n", [string:join(SL, ", ")]),
+    ok.
+
+update_converg(Reductions, BestFitness) ->
+    io:format("Converg: ~B -> ~f~n", [Reductions, BestFitness]),
     ok.
 
 update_status(Reductions, PopulationSize,
