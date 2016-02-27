@@ -22,7 +22,7 @@ update_workers(WorkerNodes) ->
     ok.
 
 update_converg(Reductions, BestFitness) ->
-    io:format("\e[11;1f\e[7mConvergence\e[0m~n~8B~n~.6f\e[K~n", [Reductions, BestFitness]),
+    io:format("\e[11;1f\e[7mConvergence\e[0m~n~11B~n~11.6f\e[K~n", [Reductions, BestFitness]),
     ok.
 
 update_status(Reductions, PopulationSize,

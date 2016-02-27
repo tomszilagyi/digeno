@@ -64,7 +64,7 @@ city_name(21) -> "Östersund".
 %% digeno callbacks
 
 get_config() -> [{population_size, 1000},
-                 %%{fitness_target, 100.0}, %% TODO convergence_detection
+                 {converg_detect, auto},
                  {display_decimator, 1000}].
 
 generate() -> utils:permutation(lists:seq(1, ?NUM_CITIES)).

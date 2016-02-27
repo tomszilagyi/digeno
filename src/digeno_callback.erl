@@ -5,6 +5,7 @@
 
 %% Return configuration to tune the GA
 -type config_key() :: population_size    %% Size of the population to breed - integer
+                    | converg_detect     %% Convergence detection mode - disabled | auto
                     | fitness_target     %% Algorithm terminates when reached - float or infinity
                     | display_decimator. %% Number of reductions per status display - integer
 -callback get_config() -> GAConfig :: [{config_key(), term()}].

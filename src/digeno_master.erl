@@ -114,8 +114,11 @@ process_result(#work_result{pid=Pid, instance=Instance, eval_result=EvalResult, 
                       n_reds=Reds, population=Tree0, config=Config,
                       converg=Converg0, terminate=Terminate0} = State) ->
     Target = proplists:get_value(fitness_target, Config, infinity),
+    ConvergMode = proplists:get_value(converg_detect, Config, disabled),
     Converg = update_converg(DispMod, Converg0, Reds, Fitness),
-    Terminate = Terminate0 orelse target_reached(Target, Fitness) orelse converg_reached(Converg),
+    Terminate = Terminate0
+        orelse target_reached(Target, Fitness)
+        orelse converg_reached(ConvergMode, Reds, Converg),
     Tree1 = gb_trees:enter(Fitness, {Instance, EvalResult}, Tree0),
     PopulationSize = proplists:get_value(population_size, Config, ?POPULATION_SIZE),
     Tree = crop_population(Tree1, gb_trees:size(Tree1) - PopulationSize),
@@ -135,14 +138,17 @@ process_result(#work_result{pid=Pid, instance=Instance, eval_result=EvalResult, 
 target_reached(infinity, _Fitness) -> false;
 target_reached(Target, Fitness) -> Fitness >= Target.
 
-converg_reached([{R1, Fb} | _]) ->
-    %% S1 = (Fw1 - Fw2) / (math:log(R1) - math:log(R2)),
-    %% S2 = (Fw2 - Fw3) / (math:log(R2) - math:log(R3)),
-    %% io:format("S1 = ~f  S2 = ~f~n", [S1, S2]),
-    %% S1 < 0.1 * S2;
-    false;
-    %(Fw1 - Fw2) / (math:log(R1) - math:log(R2)) < 0.1 * (Fw2 - Fw3) / (math:log(R2) - math:log(R3));
-converg_reached(_) -> false.
+converg_reached(disabled, _, _) -> false;
+converg_reached(_Mode, 0, _) -> false;
+converg_reached(_Mode, 1, _) -> false;
+converg_reached(_Mode, Reds, [{R1, _F1} | _] = Converg) when R1 > 1, length(Converg) > 8 ->
+    K = 1 + erlang:max(1, 9 / math:log(R1)),
+    Reds > K * R1;
+%% converg_reached(_Mode, Reds, [{R1, F1} | _] = Converg) when R1 > 1, length(Converg) > 8 ->
+%%     Qi = [Fi / math:log(Ri) || {Ri, Fi} <- Converg, Ri > 1],
+%%     put(q, Q / lists:min(Qi)),
+%%     Q < 0.9 * lists:min(Qi);
+converg_reached(_Mode, _Reds, _) -> false.
 
 crop_population(Tree, N) when N > 0 ->
     {_,_,Tree1} = gb_trees:take_smallest(Tree),

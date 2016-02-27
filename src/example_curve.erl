@@ -41,7 +41,8 @@
 %% digeno callbacks
 
 get_config() -> [{population_size, 1000},
-                 {fitness_target, 100.0},
+                 {fitness_target, 1000.0},
+                 {converg_detect, auto},
                  {display_decimator, 1000}].
 
 generate() -> random_poly(?ORDER).
