@@ -13,14 +13,11 @@
          format/1,
          format_result/1]).
 
-% debug
--compile([export_all]).
-
 %% This is a module defining a Genetic Optimisation problem.
 
 %% Problem of curve fitting a polynomial function against data points:
 %% Given an integer N and a set of data points [{X, Y}], determine the
-%% coefficients of an univariate polynomial function of order N that
+%% coefficients of a univariate polynomial function of order N that
 %% best fits the set of data. Let the error metric to be minimized be
 %% the sum of squared differences.
 
@@ -36,7 +33,7 @@
 %% according to the Taylor series expansion:
 %%   [0, 1, 0, -1/(3!), 0 1/(5!), 0, -1/(7!), ...]
 
--define(ORDER, 8).
+-define(ORDER, 7).
 
 %% digeno callbacks
 
@@ -81,9 +78,9 @@ mk_data(Fun, StartX, Delta, NumPoints, Acc) ->
 data() -> mk_data(fun(X) -> math:sin(X) end, {-math:pi(), math:pi()}, 100).
 
 eval_fn(Fn, X) ->
-    {Y, _} =lists:foldl(fun(Ai, {Acc, Xi}) ->
-                                {Acc + Ai * Xi, X * Xi}
-                        end, {0.0, 1.0}, Fn),
+    {Y, _} = lists:foldl(fun(Ai, {Acc, Xi}) ->
+                                 {Acc + Ai * Xi, X * Xi}
+                         end, {0.0, 1.0}, Fn),
     Y.
 
 eval_error(Fn, Data) ->
@@ -92,7 +89,7 @@ eval_error(Fn, Data) ->
 
 random_coeff() -> utils:crandom([-1, 1]) * random:uniform().
 
-random_poly(N) -> [random_coeff() || _P <- lists:seq(1, N)].
+random_poly(N) -> [random_coeff() || _P <- lists:seq(0, N)].
 
 adjust_coeff(A) ->
     case utils:crandom([nudge1, nudge2, mag, inv, sign, set0, set1, rand]) of

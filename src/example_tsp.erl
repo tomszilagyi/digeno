@@ -13,8 +13,8 @@
          format/1,
          format_result/1]).
 
-% debug
--compile([export_all]).
+%% other exports
+-export([city_name/1]).
 
 %% This is a module defining a Genetic Optimisation problem.
 

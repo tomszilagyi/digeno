@@ -13,6 +13,8 @@
          format/1,
          format_result/1]).
 
+%% This is a module defining a Genetic Optimisation problem.
+
 -define(TARGET, "Now is the time for all good men to come to the aid of their party!").
 
 %% digeno callbacks
@@ -28,11 +30,12 @@ mutate(Instance) ->
     utils:change_item(Pos, lists:nth(Pos, Instance) + utils:crandom([1, -1]), Instance).
 
 combine(I1, I2) ->
-    Pos1 = random:uniform(length(I1)),
-    Pos2 = random:uniform(length(I2)),
-    Sub1 = utils:crandom([lists:sublist(I1, Pos1), lists:nthtail(Pos1, I1)]),
-    Sub2 = utils:crandom([lists:sublist(I2, Pos2), lists:nthtail(Pos2, I2)]),
-    utils:crandom([Sub1 ++ Sub2, Sub2 ++ Sub1]).
+    Pos = random:uniform(length(I1)),
+    I1a = lists:sublist(I1, Pos),
+    I1b = lists:nthtail(Pos, I1),
+    I2a = lists:sublist(I2, Pos),
+    I2b = lists:nthtail(Pos, I2),
+    utils:crandom([I1a ++ I2b, I2a ++ I1b]).
 
 evaluate(Instance) -> distance(Instance, ?TARGET).
 
@@ -55,5 +58,4 @@ gen_random_string(Str, Len) -> gen_random_string([random_char() | Str], Len-1).
 dif({A, A}) -> 0;
 dif({A, B}) -> (A - B) * (A - B).
 
-distance(S1, S2) when length(S1) =:= length(S2) -> lists:sum(lists:map(fun dif/1, lists:zip(S1, S2)));
-distance(_, _) -> 9999999999.
+distance(S1, S2) -> lists:sum(lists:map(fun dif/1, lists:zip(S1, S2))).
