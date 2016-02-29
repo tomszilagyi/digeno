@@ -10,7 +10,7 @@
 
 %% TODO allow multiple instances with the same fitness in the pool
 
--record(state, {callback_module, display_module, config, n_reds,
+-record(state, {callback_module, display_module, display_state, config, n_reds,
                 population, workers, converg, terminate}).
 -record(work_result, {pid, instance, eval_result, fitness}).
 
@@ -21,7 +21,7 @@ start_link(CbMod, DispMod) ->
     gen_server:start_link({global, ?MODULE}, ?MODULE, [CbMod, DispMod], []).
 
 init([CbMod, DispMod]) ->
-    ok = DispMod:init(CbMod),
+    {ok, DispState0} = DispMod:init(CbMod),
     random:seed(now()),
 
     %% %% read back last saved state
@@ -40,12 +40,12 @@ init([CbMod, DispMod]) ->
 	_ -> ok
     end,
     save_worker_nodes([]),
-    DispMod:update_workers([]),
+    DispState = DispMod:update_workers([], DispState0),
 
     Config = CbMod:get_config(),
-    {ok, #state{callback_module=CbMod, display_module=DispMod,
-                n_reds=0, population=Tree, config=Config, workers=[],
-                converg=[], terminate=false}}.
+    {ok, #state{callback_module=CbMod, display_module=DispMod, display_state=DispState,
+                n_reds=0, population=Tree, config=Config, workers=[], converg=[],
+                terminate=false}}.
 
 handle_call(Request, From, State) ->
     io:format("~p: handle_call: req = ~p  from = ~p~n", [?MODULE, Request, From]),
@@ -58,7 +58,8 @@ handle_cast(Msg, State) ->
 handle_info(#work_result{}=WorkResult, #state{}=State) -> %% process work result
     {noreply, process_result(WorkResult, State)};
 handle_info({node, Node, Cores, Pids},
-            #state{callback_module=CbMod, display_module=DispMod, workers=Workers}=State) -> %% new worker node
+            #state{callback_module=CbMod, workers=Workers,
+                   display_module=DispMod, display_state=DispState0}=State) -> %% new worker node
     NewWorkers = [{Node, Cores, Pids} | Workers],
     erlang:monitor_node(Node, true),
     %% load our modules on the remote node
@@ -70,13 +71,14 @@ handle_info({node, Node, Cores, Pids},
     PPid = self(),
     lists:foreach(fun(P) -> spawn_generate(P, PPid, CbMod) end, Pids),
     save_worker_nodes(NewWorkers),
-    DispMod:update_workers(NewWorkers),
-    {noreply, State#state{workers=NewWorkers}};
-handle_info({nodedown, Node}, #state{display_module=DispMod, workers=Workers}=State) -> %% worker node disconnected
+    DispState = DispMod:update_workers(NewWorkers, DispState0),
+    {noreply, State#state{workers=NewWorkers, display_state=DispState}};
+handle_info({nodedown, Node}, #state{display_module=DispMod, display_state=DispState0,
+                                     workers=Workers}=State) -> %% worker node disconnected
     NewWorkers = lists:keydelete(Node, 1, Workers),
     save_worker_nodes(NewWorkers),
-    DispMod:update_workers(NewWorkers),
-    {noreply, State#state{workers=NewWorkers}};
+    DispState = DispMod:update_workers(NewWorkers, DispState0),
+    {noreply, State#state{workers=NewWorkers, display_state=DispState}};
 handle_info(Info, State) ->
     io:format("~p: handle_info: info = ~p~n", [?MODULE, Info]),
     {noreply, State}.
@@ -110,12 +112,13 @@ remote_load_modules(Node, [{Mod,_Path} | Rest]) ->
     remote_load_modules(Node, Rest).
 
 process_result(#work_result{pid=Pid, instance=Instance, eval_result=EvalResult, fitness=Fitness},
-               #state{callback_module=CbMod, display_module=DispMod,
+               #state{callback_module=CbMod,
+                      display_module=DispMod, display_state=DispState0,
                       n_reds=Reds, population=Tree0, config=Config,
                       converg=Converg0, terminate=Terminate0} = State) ->
     Target = proplists:get_value(fitness_target, Config, infinity),
     ConvergMode = proplists:get_value(converg_detect, Config, disabled),
-    Converg = update_converg(DispMod, Converg0, Reds, Fitness),
+    {Converg, DispState1} = update_converg(DispMod, DispState0, Converg0, Reds, Fitness),
     Terminate = Terminate0
         orelse target_reached(Target, Fitness)
         orelse converg_reached(ConvergMode, Reds, Converg),
@@ -130,10 +133,12 @@ process_result(#work_result{pid=Pid, instance=Instance, eval_result=EvalResult, 
     end,
     DisplayDecimator = proplists:get_value(display_decimator, Config, ?DISPLAY_DECIMATOR),
     DoDisplay = (Reds rem DisplayDecimator) == 0,
-    if DoDisplay or Terminate -> update_status(CbMod, DispMod, Reds, Tree);
-       true -> ok
-    end,
-    State#state{n_reds=Reds+1, population=Tree, converg=Converg, terminate=Terminate}.
+    DispState =
+        if DoDisplay or Terminate -> update_status(CbMod, DispMod, DispState1, Reds, Tree);
+           true -> DispState1
+        end,
+    State#state{n_reds=Reds+1, population=Tree, converg=Converg, terminate=Terminate,
+                display_state=DispState}.
 
 target_reached(infinity, _Fitness) -> false;
 target_reached(Target, Fitness) -> Fitness >= Target.
@@ -224,19 +229,20 @@ combine_eval(PPid, CbMod, Inst1, Inst2) ->
     end.
 
 
-update_converg(DispMod, [], Reds, Fitness) ->
-    DispMod:update_converg(Reds, Fitness),
-    [{Reds, Fitness}];
-update_converg(_DispMod, [{_, BestFitness} | _Rest] = Converg, _Reds, Fitness)
+update_converg(DispMod, DispState0, [], Reds, Fitness) ->
+    DispState = DispMod:update_converg(Reds, Fitness, DispState0),
+    {[{Reds, Fitness}], DispState};
+update_converg(_DispMod, DispState, [{_, BestFitness} | _Rest] = Converg, _Reds, Fitness)
   when BestFitness >= Fitness ->
-    Converg;
-update_converg(DispMod, Converg, Reds, Fitness) ->
-    DispMod:update_converg(Reds, Fitness),
+    {Converg, DispState};
+update_converg(DispMod, DispState0, Converg, Reds, Fitness) ->
+    DispState = DispMod:update_converg(Reds, Fitness, DispState0),
     NewConverg = [{Reds, Fitness} | Converg],
-    lists:sublist(NewConverg, 10). %% limit length
+    ShortList = lists:sublist(NewConverg, 10), %% limit length
+    {ShortList, DispState}.
 
 
-update_status(CbMod, DispMod, Reds, Tree) ->
+update_status(CbMod, DispMod, DispState0, Reds, Tree) ->
     %% %%Filename = io_lib:format("output/tree-~4..0B.bin", [Reds div 100]),
     %% Filename = "output/tree.bin",
     %% ok = filelib:ensure_dir(Filename),
@@ -245,6 +251,8 @@ update_status(CbMod, DispMod, Reds, Tree) ->
     {WorstFitness, {WorstInst, WorstResult}} = gb_trees:smallest(Tree),
     {BestFitness, {BestInst, BestResult}} = gb_trees:largest(Tree),
 
+    %% returns updated DispState
     DispMod:update_status(Reds, gb_trees:size(Tree),
                           {CbMod:format(WorstInst), CbMod:format_result(WorstResult), WorstFitness},
-                          {CbMod:format(BestInst), CbMod:format_result(BestResult), BestFitness}).
+                          {CbMod:format(BestInst), CbMod:format_result(BestResult), BestFitness},
+                          DispState0).

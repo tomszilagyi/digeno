@@ -3,19 +3,27 @@
 
 %% Behaviour callbacks for the module implementing the display / UI
 
+%% The display module is stateful: it returns an initial state on
+%% successful init, and gets the actual state on each subsequent
+%% call. These calls return a potentially updated state. The state is
+%% opaque; it is never interpreted, only passed around by DiGenO.
+
 %% Initialize the display module
--callback init(CbMod :: atom()) -> ok | {error, Reason :: term()}.
+-callback init(CbMod :: atom()) -> {ok, State :: term()} |
+                                   {error, Reason :: term()}.
 
 %% Update the displayed list of worker nodes
 %% Called when the worker node list has changed.
 -callback update_workers(WorkerNodes :: [{Node :: atom(),
                                           Cores :: pos_integer(),
-                                          Pids :: [pid()]}]) -> ok.
+                                          Pids :: [pid()]}],
+                         State :: term()) -> NewState :: term().
 
 %% Update convergence status
 %% Called when there is a new best fitness
 -callback update_converg(Reductions::pos_integer(),
-                         BestFitness :: float()) -> ok.
+                         BestFitness :: float(),
+                         State :: term()) -> NewState :: term().
 
 %% Update the GA status display. Note that this callback gets the
 %% instance and result already converted to printable (string) form.
@@ -26,4 +34,5 @@
                          WorstFitness :: float()},
                         {BestInst :: string(),
                          BestResult :: string(),
-                         BestFitness :: float()}) -> ok.
+                         BestFitness :: float()},
+                        State :: term()) -> NewState :: term().

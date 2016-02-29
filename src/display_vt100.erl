@@ -5,29 +5,34 @@
 
 %% digeno display callback functions
 -export([init/1,
-         update_workers/1,
-         update_converg/2,
-         update_status/4]).
+         update_workers/2,
+         update_converg/3,
+         update_status/5]).
 
 %% This is a minimalistic display module for DiGenO, meant to be run
 %% in a vt100-compatible terminal (eg. xterm).
 
+-record(state, {log_fd}).
+
 init(CbMod) ->
     io:format("\e[2J\e[0;0f"),
     io:format("DiGenO running with callback module: ~p~n", [CbMod]),
-    ok.
+    {ok, FD} = file:open("converg.log", [write]),
+    {ok, #state{log_fd=FD}}.
 
-update_workers(WorkerNodes) ->
+update_workers(WorkerNodes, State) ->
     print_worker_nodes(WorkerNodes),
-    ok.
+    State.
 
-update_converg(Reductions, BestFitness) ->
+update_converg(Reductions, BestFitness, #state{log_fd=FD}=State) ->
     io:format("\e[11;1f\e[7mConvergence\e[0m~n~11B~n~11.6f\e[K~n", [Reductions, BestFitness]),
-    ok.
+    io:format(FD, "~B, ~g~n", [Reductions, BestFitness]),
+    State.
 
 update_status(Reductions, PopulationSize,
               {WorstInst, WorstResult, WorstFitness},
-              {BestInst, BestResult, BestFitness}) ->
+              {BestInst, BestResult, BestFitness},
+              State) ->
     io:format("\e[4;1f" ++
               "Reductions: ~B~nPopulation: ~B~n~n" ++
               "\e[7m           Fitness      Result   Instance\e[0m~n" ++
@@ -36,7 +41,7 @@ update_status(Reductions, PopulationSize,
               [Reductions, PopulationSize,
                utils:format_float(WorstFitness, 10, 5), WorstResult, WorstInst,
                utils:format_float(BestFitness, 10, 5), BestResult, BestInst]),
-    ok.
+    State.
 
 %% private functions
 
