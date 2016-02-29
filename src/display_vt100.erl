@@ -12,22 +12,23 @@
 %% This is a minimalistic display module for DiGenO, meant to be run
 %% in a vt100-compatible terminal (eg. xterm).
 
--record(state, {log_fd}).
+-record(state, {log_fd, converg_pos}).
 
 init(CbMod) ->
     io:format("\e[2J\e[0;0f"),
     io:format("DiGenO running with callback module: ~p~n", [CbMod]),
+    io:format("\e[12;1f\e[7mConvergence\e[0m"),
     {ok, FD} = file:open("converg.log", [write]),
-    {ok, #state{log_fd=FD}}.
+    {ok, #state{log_fd=FD, converg_pos={0, 0}}}.
 
 update_workers(WorkerNodes, State) ->
     print_worker_nodes(WorkerNodes),
     State.
 
-update_converg(Reductions, BestFitness, #state{log_fd=FD}=State) ->
-    io:format("\e[11;1f\e[7mConvergence\e[0m~n~11B~n~11.6f\e[K~n", [Reductions, BestFitness]),
+update_converg(Reductions, BestFitness, #state{log_fd=FD, converg_pos=Pos0}=State) ->
+    Pos = print_converg(Reductions, BestFitness, Pos0),
     io:format(FD, "~B, ~g~n", [Reductions, BestFitness]),
-    State.
+    State#state{converg_pos=Pos}.
 
 update_status(Reductions, PopulationSize,
               {WorstInst, WorstResult, WorstFitness},
@@ -45,10 +46,23 @@ update_status(Reductions, PopulationSize,
 
 %% private functions
 
+print_converg(Reductions, BestFitness, {VirtRow, VirtCol}) ->
+    {ScrRow, ScrCol} = screen_pos({VirtRow, VirtCol}),
+    io:format("\e[~B;~Bf~9B~10.6f", [ScrRow, ScrCol, Reductions, BestFitness]),
+    NextRow = (VirtRow + 1) rem 10,
+    NextCol = if NextRow == 0 -> (VirtCol + 1) rem 4;
+                 true -> VirtCol
+              end,
+    {NextScrRow, NextScrCol} = screen_pos({NextRow, NextCol}),
+    io:format("\e[~B;~Bf                    ", [NextScrRow, NextScrCol]),
+    {NextRow, NextCol}.
+
+screen_pos({Row, Col}) -> {Row + 13, 20 * Col}.
+
 print_worker_nodes(Workers) ->
     SumCores = lists:sum([Cores || {_Node, Cores, _Pids} <- Workers]),
-    io:format("\e[15;0f\e[7mWorker nodes (~B)\e[0m\e[K", [SumCores]),
-    pwn_1(lists:sort(fun({NA,_,_},{NB,_,_}) -> NA =< NB end, Workers), 16).
+    io:format("\e[25;0f\e[7mWorker nodes (~B)\e[0m\e[K", [SumCores]),
+    pwn_1(lists:sort(fun({NA,_,_},{NB,_,_}) -> NA =< NB end, Workers), 26).
 
 pwn_1([], Row) ->
     io:format("\e[~B;0f\e[K", [Row]);
