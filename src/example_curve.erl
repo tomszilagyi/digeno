@@ -17,7 +17,7 @@
 
 %% Problem of curve fitting a polynomial function against data points:
 %% Given an integer N and a set of data points [{X, Y}], determine the
-%% coefficients of a univariate polynomial function of order N that
+%% coefficients of a univariate polynomial function of degree N that
 %% best fits the set of data. Let the error metric to be minimized be
 %% the sum of squared differences.
 
@@ -33,7 +33,7 @@
 %% according to the Taylor series expansion:
 %%   [0, 1, 0, -1/(3!), 0 1/(5!), 0, -1/(7!), ...]
 
--define(ORDER, 7).
+-define(DEGREE, 7).
 
 %% digeno callbacks
 
@@ -42,9 +42,9 @@ get_config() -> [{population_size, 1000},
                  {converg_detect, auto},
                  {display_decimator, 1000}].
 
-generate() -> random_poly(?ORDER).
+generate() -> random_poly(?DEGREE).
 
-mutate(Fn) -> mutate(Fn, utils:grandom(?ORDER)).
+mutate(Fn) -> mutate(Fn, utils:grandom(?DEGREE)).
 
 combine(Fn1, Fn2) ->
     [utils:crandom([Ai, Bi]) || {Ai, Bi} <- lists:zip(Fn1, Fn2)].

@@ -18,6 +18,27 @@ is running. You can even restart the master -- for example, after
 changing your problem definition -- while the workers keep running and
 wait for the master to reengage them.
 
+## Algorithm
+
+DiGenO implements a *steady state* evolution algorithm. By this we
+mean that after an initial population is built up, subsequent
+evolution is performed on a continuous basis, swapping out old
+instances in the population for new ones piecewise. This is in
+contrast with more conventional evolutional algorithms that iterate by
+generating a complete successor population at once. They usually do
+this by keeping a few percent of instances (the "elite") intact, and
+filling up the rest by mutations and cross-overs of instances selected
+from the preexisting pool.
+
+Instead of this, DiGenO generates, evaluates and releases into the
+population new instance candidates on a continuous basis, thereby
+performing a more gradual evolution. Each occasion of releasing a
+newly generated instance into the population is called a *reduction*.
+The number of reductions is a metric showing how many steps the
+genetic algorithm has done, and is similar to (but much larger than)
+the count of successive populations evolved with a conventional
+algorithm.
+
 ## Configuration
 
 The file `digeno.config` contains options for DiGenO master. Currently
@@ -67,5 +88,4 @@ The `utils` module contains several useful facilities for writing
 functions that operate in a probabilistic manner (eg. use random
 selection).
 
-A more extended guide to DiGenO usage and the provided examples:
-https://tomszilagyi.github.io/digeno
+More on DiGenO: https://tomszilagyi.github.io/digeno
