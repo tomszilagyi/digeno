@@ -27,7 +27,7 @@ update_workers(Workers, State) ->
     State.
 
 update_converg(Reductions, BestFitness, #state{log_fd=FD}=State) ->
-    io:format(FD, "~B, ~g~n", [Reductions, BestFitness]),
+    io:format(FD, "~B, ~.8g~n", [Reductions, BestFitness]),
     State.
 
 update_status(Reductions, PopulationSize,
